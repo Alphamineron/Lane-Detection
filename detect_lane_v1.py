@@ -209,11 +209,13 @@ def check_BUF(lines):
         Buffer.left.push(lines[0])
         Buffer.right.push(lines[1])
     else:
-        lines = np.array([np.array([0, 0, 0, 0]), np.array([0, 0, 0, 0])])
         if Buffer.left is not None:
+            lines = np.array([np.array([0, 0, 0, 0]), np.array([0, 0, 0, 0])])
             lines[0] = np.average(Buffer.left.stack, axis=0)
 
         if Buffer.right is not None:
+            if lines is None:     # Which would happen if the Buffer.left was None
+                lines = np.array([np.array([0, 0, 0, 0]), np.array([0, 0, 0, 0])])
             lines[1] = np.average(Buffer.right.stack, axis=0)
 
     return lines
@@ -251,7 +253,8 @@ def stablise_lines(lines):
             # 1 * detected + 0 * avg from buffer      : In case of stable lane.
             stable_lines.append(np.dot(weights, np.vstack([laneline, bufline])))
         lines = np.array([stable_lines[0], stable_lines[1]])
-
+    else:
+        stablestat = np.array([0, 0])
 
     return lines, stablestat
 
@@ -349,7 +352,7 @@ def image_pipeline(frame):
 
 
 # Open the capture stream
-vin = cv.VideoCapture("/Users/AI-Mac1/Desktop/harder_challenge_video.mp4")
+vin = cv.VideoCapture("test_data/challenge_video.mp4")
 if(not vin.isOpened()):
     vin.open()
 while(True):
