@@ -72,11 +72,9 @@ class Buffer(object):
 #  ██████     ██    ██ ███████ ██    ██       ██
 
 COLORS = {   # Colors to be Used
-        "lane_color" : (244, 65, 205),
+        "lane_color" : (250, 100, 20),
         "region_stable" : (60, 120, 0),
         "region_unstable" : (60, 80, 255),
-        "left_line" : (220, 40, 60),
-        "right_line" : (255, 0, 255),
 }
 
 def gimp_to_opencv_hsv(*hsv): # Simple GIMP => CV2 HSV format converter.
@@ -352,7 +350,7 @@ def image_pipeline(frame):
 
 
 # Open the capture stream
-vin = cv.VideoCapture("test_data/challenge_video.mp4")
+vin = cv.VideoCapture("OpenCV/detect_lanes/test_data/challenge_video.mp4")
 if(not vin.isOpened()):
     vin.open()
 while(True):
