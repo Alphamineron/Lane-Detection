@@ -36,32 +36,77 @@
 #
 #
 # --------------------------------------------------------------------------
-
+import math
 from copy import deepcopy
 import numpy as np
 import cv2 as cv
+import os
+from subprocess import Popen, PIPE
+PIPE_PATH = "/tmp/Acceleration_Prediction"
+if not os.path.exists(PIPE_PATH):
+    os.mkfifo(PIPE_PATH)
+Popen(['xterm', '-e', 'tail -f %s' % PIPE_PATH])
+
 
 height, width = (600,600)  # Dimension of the image, crucial for coord sys
                            # functioning. These values are arbitary, it'll
                            # be updated locally within the image pipeline
 
-class Buffer(object):
-    N_BUFFER_FRAMES = 5
 
+class Buffer(object):
+    N_BUFFER_FRAMES = 6  # No. of History Lines excluding current detection line
+
+    # Containers for holding buffer stacks throughout the program execution
+    frames = None     # Saves Frames of video (Buffer Object)
     left = None
     right = None
 
-    def __init__(self, line):
+    def __init__(self, line, bufsize = None):
         self.stack = np.array(line)  # Line = [x1, y2, x2, y2]
+
+        if(bufsize == None):
+            bufsize = Buffer.N_BUFFER_FRAMES
+        self.N_BUFFER_FRAMES = bufsize
         self.current_frames = 0
 
     def push(self, line):
-        if self.current_frames < Buffer.N_BUFFER_FRAMES:
+        if self.current_frames < self.N_BUFFER_FRAMES:
             self.stack = np.vstack((line, self.stack))
             self.current_frames+=1
         else:
-            self.stack = np.delete(self.stack, 4, axis = 0)
+            self.stack = np.delete(self.stack, self.N_BUFFER_FRAMES-1, axis = 0)
             self.stack = np.vstack((line, self.stack))
+
+class Acc_Predictor(object):
+    object = None
+    CALLSTEP = 5
+    STACK_SIZE = 2
+
+    def __init__(self, frame):  # Intended to be working on ROI Image
+        Buffer.frames = Buffer(frame[np.newaxis, ...], Acc_Predictor.STACK_SIZE)
+
+    def learn(self, frame):
+        Buffer.frames.push(frame[np.newaxis, ...])
+
+    def distance(self, frame):
+        # Buffer.frames.stack.shape(7, 720, 1280)
+        # frame.shape(720, 1280)
+        return np.mean(np.abs(Buffer.frames.stack - frame))
+
+    def predict_acc(self, frame):
+        with open(PIPE_PATH, "w") as p:
+            if Buffer.frames.current_frames < Buffer.frames.N_BUFFER_FRAMES:
+                p.write("\nPrediction Unavailable! Still Training...")
+                # print("Prediction Unavailable! Still Training...")
+            else:
+                MAX_IMAGE_DIFFERENCE = 1.7
+                if(self.distance(frame) < MAX_IMAGE_DIFFERENCE):
+                    p.write("\nSuggested Acceleration: +ve or 0")
+                    # print("Suggested Acceleration: +ve or 0")
+                else:
+                    p.write("\nSuggested Acceleration: -ve")
+                    # print("Suggested Acceleration: -ve")
+
 
 
 
@@ -132,6 +177,14 @@ def make_coords(l_parameters):  # Create coords from given line parameters
     x2 = int((y2 - intercept)/slope)
     return np.array([x1, y1, x2, y2])
 
+def distance_to_lane_line(l1, l2):
+    x = (l1[2] + l1[0]) / 2     # Find Average Point
+    y = (l1[3] + l1[1]) / 2     # on Current Line Obj
+    m = cal_slope(l2)
+    c = cal_intercept(l2, m)
+    distance = abs(m*x - y + c) / math.sqrt(m**2 + 1)
+    return distance
+
 def clean_lane_lines(img, lines):
     """
      Process Hough Lines and generate final lane Prediction.
@@ -200,12 +253,14 @@ def check_BUF(lines):
 
         if np.array_equal(lines[0], np.array([0, 0, 0, 0])):
             lines[0] = np.average(Buffer.left.stack, axis=0)
+        else:
+            Buffer.left.push(lines[0])   # Only push when buffer is not used
 
         if np.array_equal(lines[1], np.array([0, 0, 0, 0])):
             lines[1] = np.average(Buffer.right.stack, axis=0)
+        else:
+            Buffer.right.push(lines[1])   # Only push when buffer is not used
 
-        Buffer.left.push(lines[0])
-        Buffer.right.push(lines[1])
     else:
         if Buffer.left is not None:
             lines = np.array([np.array([0, 0, 0, 0]), np.array([0, 0, 0, 0])])
@@ -224,11 +279,21 @@ def check_slope_condition(s1, s2):
         return False
     return True
 
+def check_dist_condition(l1, l2):
+    CRITICAL_DISTANCE_CHANGE = 8
+    dist = distance_to_lane_line(l1, l2)
+    if dist > CRITICAL_DISTANCE_CHANGE:
+        return False
+    return True
+
 def cal_slope(line):
     x1, y1, x2, y2 = line
     if x2-x1 == 0:
         return 2147483647
     return ((y2-y1)/(x2-x1))
+
+def cal_intercept(line, slope):
+    return line[1] - slope * line[0]
 
 def stablise_lines(lines):
     DECISION_MAT = [[.1, .9], [1, 0]]
@@ -243,7 +308,9 @@ def stablise_lines(lines):
             bufline_slope = cal_slope(bufline)
             lane_slope = cal_slope(laneline)
 
-            stability = check_slope_condition(bufline_slope, lane_slope)
+            stability1 = check_slope_condition(bufline_slope, lane_slope)
+            stability2 = check_dist_condition(laneline, bufline)
+            stability = stability1 & stability2
             stablestat = np.append(stablestat, int(stability))  # Storing Stability
 
             weights = DECISION_MAT[stability]
@@ -285,7 +352,7 @@ def draw_lane_polygon(img, lines, stability):
         cv.fillPoly(poly_img, [polygon_points], color)
 
     return poly_img
-
+#
 def draw_dashboard(img, snapshot1, snapshot2, snapshot3):
     # 160 width for each window
     cv.CV_FILLED = -1
@@ -304,6 +371,14 @@ def draw_dashboard(img, snapshot1, snapshot2, snapshot3):
     img[20:155,280:520,:] = snapshot2
     img[20:155,540:780,:] = snapshot3
     return img
+
+def use_predictor(frame):
+    canny_accPredict = cv.Canny(frame, 50, 150)
+    roi_accPredict = ROI(canny_accPredict)
+    if(Acc_Predictor.object == None):
+        Acc_Predictor.object = Acc_Predictor(roi_accPredict)
+    Acc_Predictor.object.learn(roi_accPredict)
+    Acc_Predictor.object.predict_acc(roi_accPredict)
 
 # ██████  ██ ██████  ███████ ██      ██ ███    ██ ███████
 # ██   ██ ██ ██   ██ ██      ██      ██ ████   ██ ██
@@ -337,6 +412,7 @@ def image_pipeline(frame):
     lane = draw_lanes(frame, lane_lines)
     poly = draw_lane_polygon(frame, lane_lines, stability)
     lane = cv.addWeighted(lane, 1.0, poly, 0.4, 0)
+
     detection = cv.addWeighted(frame, 0.8, lane, 1, 0)
 
 
@@ -349,10 +425,14 @@ def image_pipeline(frame):
 
 
 
+# "OpenCV/detect_lanes/test_data/challenge_video.mp4"
+# "/Users/AI-Mac1/Downloads/Close Calls - Good Driving Skills or Luck.mp4"
 # Open the capture stream
-vin = cv.VideoCapture("OpenCV/detect_lanes/test_data/challenge_video.mp4")
+vin = cv.VideoCapture("OpenCV/detect_lanes/test_data/harder_challenge_video.mp4")
 if(not vin.isOpened()):
     vin.open()
+
+frame_count = 0
 while(True):
     # cameraturing the video feed frame by frame
     ret, frame = vin.read()
@@ -360,6 +440,11 @@ while(True):
     if(ret):
         # Operations on the frames
         detection = image_pipeline(frame)
+        if(frame_count == Acc_Predictor.CALLSTEP):
+            use_predictor(frame)
+            frame_count = 0
+        else:
+            frame_count += 1
 
         # Displaying the frames
         cv.imshow("detection", detection)
