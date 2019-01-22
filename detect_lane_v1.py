@@ -32,7 +32,7 @@
 #                        output windows which were used before
 #
 #
-#     Alphamineron --  Created: 13/12/18        Updated: 18/12/18
+#     Alphamineron --  Created: 13/12/18        Updated: 20/1/19
 #
 #
 # --------------------------------------------------------------------------
@@ -42,15 +42,18 @@ import numpy as np
 import cv2 as cv
 import os
 from subprocess import Popen, PIPE
-PIPE_PATH = "/tmp/Acceleration_Prediction"
-if not os.path.exists(PIPE_PATH):
-    os.mkfifo(PIPE_PATH)
-Popen(['xterm', '-e', 'tail -f %s' % PIPE_PATH])
+
 
 
 height, width = (600,600)  # Dimension of the image, crucial for coord sys
                            # functioning. These values are arbitary, it'll
                            # be updated locally within the image pipeline
+INHOUSEVID = "OpenCV/detect_lanes/test_data/challenge_video.mp4"
+INHOUSEVIDHARD = "OpenCV/detect_lanes/test_data/harder_challenge_video.mp4"
+DOWNLOADEDVID = "/Users/AI-Mac1/Downloads/challenge.mp4"
+# Assign an address to the VIDEO string variable to work on that video
+VIDEO = DOWNLOADEDVID
+
 
 
 class Buffer(object):
@@ -77,6 +80,56 @@ class Buffer(object):
             self.stack = np.delete(self.stack, self.N_BUFFER_FRAMES-1, axis = 0)
             self.stack = np.vstack((line, self.stack))
 
+class Printer(object):
+    Xterm = None    # To ensure that the Xterm is opened only when it's needed
+                    # and only once during the entire program lifespan
+    @staticmethod
+    def Xterm(string, *_):
+        if(Printer.Xterm == None):
+            PIPE_PATH = "/tmp/Acceleration_Prediction"
+            if not os.path.exists(PIPE_PATH):
+                os.mkfifo(PIPE_PATH)
+            Popen(['xterm', '-e', 'tail -f %s' % PIPE_PATH])
+
+        with open(PIPE_PATH, "w") as p:
+            p.write("\n" + string)
+
+    @staticmethod
+    def Term(string, *_):
+        print(string)
+
+    @staticmethod
+    def OpenCV(string, dashboard, color = None):
+        colors = {   # Colors to be Used
+               "WHITE" : (255, 255, 255),
+               "BLUE"  : (250, 100, 20),
+               "GREEN" : (60, 255, 0),
+               "RED"   : (0, 0, 255),
+               "BLACK" : (0, 0, 0),
+        }
+        img = np.zeros((height,width,3), dtype = "uint8")  # As default dtype is 'float64'
+
+        if color is not None:
+            image_copy = deepcopy(img)
+            cv.CV_FILLED = -1
+            cv.rectangle(image_copy, (540+260,0), (540+260+100,175), colors[color], cv.CV_FILLED)
+            img = cv.addWeighted(image_copy, 0.4, img, 0.6, 0)
+        else:
+            font                   = cv.FONT_HERSHEY_SIMPLEX
+            upperRightCorner = (width - 460, 50)
+            fontScale              = 0.75
+            fontColor              = (255,255,255)
+            lineType               = 2
+            cv.putText(img, string,
+                upperRightCorner,
+                font,
+                fontScale,
+                fontColor,
+                lineType)
+
+        return img
+
+
 class Acc_Predictor(object):
     object = None
     CALLSTEP = 5
@@ -89,23 +142,29 @@ class Acc_Predictor(object):
         Buffer.frames.push(frame[np.newaxis, ...])
 
     def distance(self, frame):
-        # Buffer.frames.stack.shape(7, 720, 1280)
+        # Buffer.frames.stack.shape(STACK_SIZE, 720, 1280)
         # frame.shape(720, 1280)
         return np.mean(np.abs(Buffer.frames.stack - frame))
 
-    def predict_acc(self, frame):
-        with open(PIPE_PATH, "w") as p:
-            if Buffer.frames.current_frames < Buffer.frames.N_BUFFER_FRAMES:
-                p.write("\nPrediction Unavailable! Still Training...")
-                # print("Prediction Unavailable! Still Training...")
+    def predict_acc(self, frame, output = "Xterm", dashboard = None, colors = False):
+        printfunc = getattr(Printer, output)
+
+        img = None  # To capture the output image in case outputSytle is OpenCV
+        if(colors == True):  # Little if-else to give extra control to calling statement
+            colors = ["BLACK", "GREEN", "RED"]
+        else:             # It just helps us toggle between the two modes easily
+            colors = [None, None, None]
+
+
+        if Buffer.frames.current_frames < Buffer.frames.N_BUFFER_FRAMES:
+            img = printfunc("Prediction Unavailable! Still Training...", dashboard, colors[0])
+        else:
+            MAX_IMAGE_DIFFERENCE = 1.7
+            if(self.distance(frame) < MAX_IMAGE_DIFFERENCE):
+                img = printfunc("Suggested Acceleration: +ve or 0", dashboard, colors[1])
             else:
-                MAX_IMAGE_DIFFERENCE = 1.7
-                if(self.distance(frame) < MAX_IMAGE_DIFFERENCE):
-                    p.write("\nSuggested Acceleration: +ve or 0")
-                    # print("Suggested Acceleration: +ve or 0")
-                else:
-                    p.write("\nSuggested Acceleration: -ve")
-                    # print("Suggested Acceleration: -ve")
+                img = printfunc("Suggested Acceleration: -ve", dashboard, colors[2])
+        return img
 
 
 
@@ -352,7 +411,7 @@ def draw_lane_polygon(img, lines, stability):
         cv.fillPoly(poly_img, [polygon_points], color)
 
     return poly_img
-#
+
 def draw_dashboard(img, snapshot1, snapshot2, snapshot3):
     # 160 width for each window
     cv.CV_FILLED = -1
@@ -378,7 +437,7 @@ def use_predictor(frame):
     if(Acc_Predictor.object == None):
         Acc_Predictor.object = Acc_Predictor(roi_accPredict)
     Acc_Predictor.object.learn(roi_accPredict)
-    Acc_Predictor.object.predict_acc(roi_accPredict)
+    return Acc_Predictor.object.predict_acc(roi_accPredict, output = "OpenCV", dashboard = frame, colors = False)
 
 # ██████  ██ ██████  ███████ ██      ██ ███    ██ ███████
 # ██   ██ ██ ██   ██ ██      ██      ██ ████   ██ ██
@@ -425,13 +484,12 @@ def image_pipeline(frame):
 
 
 
-# "OpenCV/detect_lanes/test_data/challenge_video.mp4"
-# "/Users/AI-Mac1/Downloads/Close Calls - Good Driving Skills or Luck.mp4"
 # Open the capture stream
-vin = cv.VideoCapture("OpenCV/detect_lanes/test_data/harder_challenge_video.mp4")
+vin = cv.VideoCapture(VIDEO)
 if(not vin.isOpened()):
     vin.open()
 
+first = True
 frame_count = 0
 while(True):
     # cameraturing the video feed frame by frame
@@ -440,11 +498,19 @@ while(True):
     if(ret):
         # Operations on the frames
         detection = image_pipeline(frame)
+
+
+        if first == True:   # Silly way of making sure that prediction is only
+                            # initalized once, after the global h & w are updated
+            prediction = np.zeros((height,width,3), dtype = "uint8")
+            first = False
         if(frame_count == Acc_Predictor.CALLSTEP):
-            use_predictor(frame)
+            prediction = use_predictor(detection)
             frame_count = 0
-        else:
-            frame_count += 1
+        else: frame_count += 1
+
+
+        detection = cv.add(detection, prediction)
 
         # Displaying the frames
         cv.imshow("detection", detection)
