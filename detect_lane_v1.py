@@ -453,7 +453,6 @@ def image_pipeline(frame):
     hsv_image = cv.cvtColor(frame, cv.COLOR_BGR2HSV)  # HSV: Inuitive Color distribution -> Easy thresholding
     thresholded = get_lane_lines_mask(hsv_image, [WHITE_LINES, YELLOW_LINES])
 
-
     #====================++++++++++++================+++++++==============
     canny = cv.Canny(thresholded, 50, 150)  # TODO: Play with this threshold
     #====================++++++++++++================+++++++==============
@@ -483,45 +482,44 @@ def image_pipeline(frame):
     return detection
 
 
+if __name__ == "__main__":
+    # Open the capture stream
+    vin = cv.VideoCapture(VIDEO)
+    if(not vin.isOpened()):
+        vin.open()
 
-# Open the capture stream
-vin = cv.VideoCapture(VIDEO)
-if(not vin.isOpened()):
-    vin.open()
+    first = True
+    frame_count = 0
+    while(True):
+        # cameraturing the video feed frame by frame
+        ret, frame = vin.read()
 
-first = True
-frame_count = 0
-while(True):
-    # cameraturing the video feed frame by frame
-    ret, frame = vin.read()
-
-    if(ret):
-        # Operations on the frames
-        detection = image_pipeline(frame)
-
-
-        if first == True:   # Silly way of making sure that prediction is only
-                            # initalized once, after the global h & w are updated
-            prediction = np.zeros((height,width,3), dtype = "uint8")
-            first = False
-        if(frame_count == Acc_Predictor.CALLSTEP):
-            prediction = use_predictor(detection)
-            frame_count = 0
-        else: frame_count += 1
+        if(ret):
+            # Operations on the frames
+            detection = image_pipeline(frame)
 
 
-        detection = cv.add(detection, prediction)
+            if first == True:   # Silly way of making sure that prediction is only
+                                # initalized once, after the global h & w are updated
+                prediction = np.zeros((height,width,3), dtype = "uint8")
+                first = False
+            if(frame_count == Acc_Predictor.CALLSTEP):
+                prediction = use_predictor(detection)
+                frame_count = 0
+            else: frame_count += 1
 
-        # Displaying the frames
-        cv.imshow("detection", detection)
-        if(cv.waitKey(1) == 27):
+            detection = cv.add(detection, prediction)
+
+            # Displaying the frames
+            cv.imshow("detection", detection)
+            if(cv.waitKey(1) == 27):
+                break
+
+        else:
+            print("Video Feed Terminated")
             break
-
-    else:
-        print("Video Feed Terminated")
-        break
-vin.release()
-cv.destroyAllWindows()
+    vin.release()
+    cv.destroyAllWindows()
 
 
 
