@@ -359,8 +359,15 @@ def stablise_lines(lines):
     stable_lines = []
     stablestat = np.array([], dtype="int64")
     if lines is not None:
-        left_bufline = np.average(Buffer.left.stack, axis=0)
-        right_bufline = np.average(Buffer.right.stack, axis=0)
+        # To AVOID Scalar Output from np.avg
+        if(len(Buffer.left.stack.shape)>1):
+            left_bufline = np.average(Buffer.left.stack, axis=0)
+        else:
+            left_bufline = Buffer.left.stack
+        if(len(Buffer.right.stack.shape)>1):
+            right_bufline = np.average(Buffer.right.stack, axis=0)
+        else:
+            right_bufline = Buffer.right.stack
         buflines = [left_bufline, right_bufline]
 
         for bufline, laneline in zip(buflines, lines):
