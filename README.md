@@ -17,3 +17,4 @@ https://user-images.githubusercontent.com/25489235/137221061-86a63360-ab7c-4dce-
 ## Limitations
 The minimalistic line detection system deployed here suffers most in unevenly lit scenes and high angle swirly roads (hill roads). However, it does have some resillence built-in to handle brief absence of visibility/no data (Passing under a bridge) by giving the lane-lines virtual inertia.
 
+https://user-images.githubusercontent.com/25489235/137228260-53f3de97-f839-41b8-8a09-ee8ff9084cf0.mp4
